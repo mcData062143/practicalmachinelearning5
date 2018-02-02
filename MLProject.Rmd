@@ -1,0 +1,103 @@
+---
+title: "Predicting the Quaity of a bicep Curl Execution"
+author: "M. E. Crotzer"
+date: "February 1, 2018"
+output: html_document
+---
+
+## Summary
+
+Qualitative Activity Recognition (QAR) has become an active area of research with broad applicability in sports medicine and, in the health area, motor skills recovery. The focus on QAR is to pridict how well the activity was performed and not which activity.  In this study, 6 male subjects performed a Unilateral Dumbell Biceps Curl correctly (classe A), and purposefully, 4 incorrect ways (Classes B to E). Data was recorded on sensing devices on the glove, armband, belt, and dumbbell.  A random forest analysis was used to "train" the recognition process. The model so trained was applied to a test set with a 0.994 recognition accuracy. The model was then run on a validation data set.
+
+## Data Retrieval and Preparation
+
+The data was contained in 2 set: Training and testing.  The training set had provisions for all of the sensing data on 19622 observations, but only a fraction had data.  The testing set had 20 observations with identical provisions. both data sets were subset to inclde only the recorded data.  The training set was divided into a training and test set to to test the model.  The original training set of 20 was used as a validation data set.
+
+```{r chunk 1}
+
+ptrn<-read.csv('./pml-training.csv', header=TRUE)
+pval<-read.csv('./pml-testing.csv', header=TRUE)
+
+library("dplyr", lib.loc="~/R/win-library/3.4")
+library("caret", lib.loc="~/R/win-library/3.4")
+library("knitr", lib.loc="~/R/win-library/3.4")
+
+ptrn1 <- select(ptrn, user_name,roll_belt:total_accel_belt, gyros_belt_x:total_accel_arm,
+                gyros_arm_x:magnet_arm_z, roll_dumbbell:yaw_dumbbell, 
+                total_accel_dumbbell, gyros_dumbbell_x:yaw_forearm, total_accel_forearm,
+                gyros_forearm_x:classe)
+
+ptrn2 <- select(ptrn1, -user_name)
+
+pval1 <- select(pval, roll_belt:total_accel_belt, gyros_belt_x:total_accel_arm,
+                gyros_arm_x:magnet_arm_z, roll_dumbbell:yaw_dumbbell, 
+                total_accel_dumbbell, gyros_dumbbell_x:yaw_forearm, total_accel_forearm,
+                gyros_forearm_x:magnet_forearm_z)
+
+```
+
+## exploratory Data Analysis
+
+Summaries of some of the data is presented in Figures 1 to 3.  figure 1 shows there were more correct xecutions relative to incorrect.  The incorrect fashions were relatively uniform.  With 52 variables, one can explore all aspects of the bicep curl.  Figures 2 and 3 focus on Total dumbbell acceleration by fashion and participant.
+
+```{r chunk 2}
+tblFashions <- with(ptrn1, table(user_name,classe))
+barplot(tblFashions, main = " Figure 1: Unilateral Dumbbell Biceps Curl Distribution",
+        xlab="Fashion (A=Correct)", ylab="frequency")
+
+boxplot(ptrn1$total_accel_dumbbell ~ ptrn1$classe, 
+        main = "Figure 2:Total Dumbbell Acceleration by Fashion",
+        xlab="Fashion (A=Correct)", ylab="frequency")
+
+boxplot(ptrn1$total_accel_dumbbell ~ ptrn1$user_name, 
+        main = "Figure 3: Total Dumbbell Acceleration by User",
+        xlab="User", ylab="frequency")
+
+
+```
+
+## Modelling
+
+A random forest decision process was set up to model the dumbell execution. 5-fold cross validation was used and parallel processing was needed to converge to a model in reasonable time.  Execution of the process took 10 minutes on a relatively old Lenovo computer. The in-model accuracy on 13737 samples was 0.9912.
+
+```{r chunk 3}
+## Training and Test set
+set.seed(13118)  
+intrn <- createDataPartition(y=ptrn2$classe, p=0.7, list=FALSE)
+trn <- ptrn2[intrn,]; tst <- ptrn2[-intrn,]
+
+##  rf model with parallel processing
+library(ParallelForest)
+library(doParallel)
+x <- trn[,-53]
+y <- trn[,53]
+
+cluster <- makeCluster(3) 
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+modFit <- train(x, y, method="rf", data=trn, trControl = fitControl)
+
+stopCluster(cluster)
+registerDoSEQ()
+
+```
+
+## Prediction
+
+The resulting model was applied to the test set carved out of the original training set. The predicted results were compared to the actual values via a confusion matrix.  The accuracy on this set was 0.9944.  The model was then run on the validation set.  Presumably, there should be high confidence that this prediction is correct.
+
+```{r chunk 4}
+## Predict on Test set
+print(modFit)
+predtrn <- predict(modFit, newdata=tst)
+confusionMatrix(predtrn, tst$classe)
+
+##Predict on validation set
+predval <- predict(modFit, newdata=pval1)
+table(predval)
+
+```
+
